@@ -6,7 +6,7 @@
 # 并且支持 NAS 路径到 Emby 容器内部路径的映射。 并且支持多媒体库监控。
 # 适用于 Emby 服务器版本 4.x 及以上，远程SMB，WebDAV等不在一个主机上的不能直接使用Emby文件夹监控的情况。
 # Powered by PeiFeng.Li - https://peifeng.li
-# Version = "v1.0.0 - 2025-10-18"
+# Version = "v1.0.1 - 2025-10-19"
 
 import os
 import time
@@ -16,11 +16,13 @@ from logging.handlers import RotatingFileHandler
 import requests
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+import sys
+import fcntl
 
 # --- 您需要在此处进行配置 ---
 # Emby 服务器信息
-EMBY_SERVER_URL = "http://10.0.0.88:8096"  # 替换为您的 Emby 服务器地址
-EMBY_API_KEY = "888888888888888888"           # 替换为您的 Emby API 密钥
+EMBY_SERVER_URL = "http://10.0.0.3:8096"  # 替换为您的 Emby 服务器地址
+EMBY_API_KEY = "aaaaaabbbbbbcccccccdddd"           # 替换为您的 Emby API 密钥
 
 # NAS路径到Emby容器内部路径的映射
 # 格式: {"NAS上的绝对路径": "Emby容器内部看到的路径"}
@@ -33,8 +35,8 @@ NAS_TO_CONTAINER_PATH_MAP = {
 # 媒体库路径到 ID 的映射
 # 格式: {"NAS 上的绝对路径": "Emby 媒体库 ID"}
 MONITORED_FOLDERS_TO_LIBRARY_ID_MAP = {
-    "/volume1/Video/电影": "1",  # 电影
-    "/volume1/Video/电视剧": "2",  # 电视剧
+    "/volume1/Video/电影": "888",  # 电影
+    "/volume1/Video/电视剧": "999",  # 电视剧
     # 在这里添加更多您需要监控的文件夹和对应的媒体库 ID...
 }
 
@@ -42,14 +44,22 @@ MONITORED_FOLDERS_TO_LIBRARY_ID_MAP = {
 VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.mpg', '.mpeg', '.flv', '.webm', '.ts', '.rmvb', '.iso', '.vob')
 
 # 扫描触发周期（秒）
-SCAN_INTERVAL_SECONDS = 300  # 每隔5分钟检查一次文件变动
+SCAN_INTERVAL_SECONDS = 600  # 每隔10分钟检查一次文件变动
 # 日志文件配置
-LOG_FILE_PATH = "/volume5/docker/scripts/emby_monitor.log"  # 日志文件存放路径，请确保该目录存在
+LOG_FILE_PATH = "/volume1/docker/Emby_Monitor/emby_monitor.log"  # 日志文件存放路径，请确保该目录存在
 LOG_MAX_BYTES = 1 * 1024 * 1024  # 1 MB
 LOG_BACKUP_COUNT = 2  # 最多保留3个日志文件 (monitor.log, monitor.log.1, monitor.log.2)
 
 # --- 配置结束 ---
 
+# 单实例锁检查
+def single_instance_lock(lockfile):
+    try:
+        lock_file = open(lockfile, 'w')
+        fcntl.lockf(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except IOError:
+        return False
 
 # 全局变量，用于在线程间共享待处理的扫描请求
 scan_requests = set()
@@ -65,7 +75,7 @@ def setup_logging():
     if logger.hasHandlers():
         logger.handlers.clear()
 
-    formatter = logging.Formatter('[%(asctime)s]  %(message)s', datefmt='%m-%d %H:%M:%S')
+    formatter = logging.Formatter('%(asctime)s  %(message)s\n', datefmt='%m-%d %H:%M:%S')
 
     # 创建一个轮转文件处理器
     # maxBytes: 日志文件最大大小
@@ -204,14 +214,20 @@ class VideoChangeHandler(FileSystemEventHandler):
             self._queue_scan_request(event.src_path)
             self._queue_scan_request(event.dest_path)
 
+# 在 main() 前调用
+LOCK_FILE = "/tmp/emby-monitor.lock"
+if not single_instance_lock(LOCK_FILE):
+    logger.error("🔴 另一个实例正在运行，退出")
+    sys.exit(1)
+
 def main():
     """主函数"""
-    logger.info("="*50)
+    logger.info("🔸"*15)
     logger.info("❤️ Emby 媒体库监测脚本已启动。")
     logger.info(f"❤️ 将每隔 {SCAN_INTERVAL_SECONDS} 秒检查一次文件变动。")
     logger.info("❤️ 正在监控以下文件夹:")
     for path in MONITORED_FOLDERS_TO_LIBRARY_ID_MAP.keys():
-        logger.info(f"📂  {path}")
+        logger.info(f"📂 - {path}")
 
     event_handler = VideoChangeHandler()
     observer = Observer()
@@ -224,7 +240,7 @@ def main():
 
     observer.start()
     logger.info("🟢 文件系统监测已启动...")
-
+    logger.info("🔸"*15)
     try:
         while True:
             time.sleep(SCAN_INTERVAL_SECONDS)
