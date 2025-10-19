@@ -20,7 +20,11 @@
 - 提供了在群晖中通过“任务计划程序”或 SSH 在后台稳定运行的说明。
 
 截图：
-![截图](monitor.png)
+
+<img width="688" height="384" alt="截屏2025-10-19 17 01 45" src="https://github.com/user-attachments/assets/2a358502-8cac-42e4-a802-f505c34c73d1" />
+
+<img width="792" height="421" alt="截屏2025-10-19 17 02 31" src="https://github.com/user-attachments/assets/24559889-c626-4a4c-900f-748b95efd4bd" />
+
 
 ## 第1步：准备环境
 在群晖上运行此脚本，需要先通过 SSH 登录到您的 NAS，并安装必要的 Python 库。
