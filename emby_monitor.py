@@ -6,7 +6,7 @@
 # 并且支持 NAS 路径到 Emby 容器内部路径的映射。 并且支持多媒体库监控。
 # 适用于 Emby 服务器版本 4.x 及以上，远程SMB，WebDAV等不在一个主机上的不能直接使用Emby文件夹监控的情况。
 # Powered by PeiFeng.Li - https://peifeng.li
-# Version = "v1.0.1 - 2025-10-19"
+# Version = "v1.0.3 - 2025-10-19"
 
 import os
 import time
@@ -22,7 +22,7 @@ import fcntl
 # --- 您需要在此处进行配置 ---
 # Emby 服务器信息
 EMBY_SERVER_URL = "http://10.0.0.3:8096"  # 替换为您的 Emby 服务器地址
-EMBY_API_KEY = "aaaaaabbbbbbcccccccdddd"           # 替换为您的 Emby API 密钥
+EMBY_API_KEY = "888888888888888888888"           # 替换为您的 Emby API 密钥
 
 # NAS路径到Emby容器内部路径的映射
 # 格式: {"NAS上的绝对路径": "Emby容器内部看到的路径"}
@@ -35,8 +35,8 @@ NAS_TO_CONTAINER_PATH_MAP = {
 # 媒体库路径到 ID 的映射
 # 格式: {"NAS 上的绝对路径": "Emby 媒体库 ID"}
 MONITORED_FOLDERS_TO_LIBRARY_ID_MAP = {
-    "/volume1/Video/电影": "888",  # 电影
-    "/volume1/Video/电视剧": "999",  # 电视剧
+    "/volume1/Video/电影": "8888",  # 电影
+    "/volume1/Video/电视剧": "9999",  # 电视剧
     # 在这里添加更多您需要监控的文件夹和对应的媒体库 ID...
 }
 
@@ -46,7 +46,7 @@ VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.mpg', '.mpeg', '.f
 # 扫描触发周期（秒）
 SCAN_INTERVAL_SECONDS = 600  # 每隔10分钟检查一次文件变动
 # 日志文件配置
-LOG_FILE_PATH = "/volume1/docker/Emby_Monitor/emby_monitor.log"  # 日志文件存放路径，请确保该目录存在
+LOG_FILE_PATH = "/volume5/docker/Emby_Monitor/emby_monitor.log"  # 日志文件存放路径，请确保该目录存在
 LOG_MAX_BYTES = 1 * 1024 * 1024  # 1 MB
 LOG_BACKUP_COUNT = 2  # 最多保留3个日志文件 (monitor.log, monitor.log.1, monitor.log.2)
 
@@ -116,7 +116,8 @@ def trigger_emby_scan(library_id=None):
         nas_paths = [path for path, lid in MONITORED_FOLDERS_TO_LIBRARY_ID_MAP.items() if lid == library_id]
         
         if not nas_paths:
-            logger.error(f"🔴 找不到媒体库(编号: {library_id}) 对应的路径。请检查映射表配置。")
+            logger.error(f"🔴 找不到媒体库(编号: {library_id}) 对应的路径")
+            logger.error("🔴 请检查配置部分映射表内容")
             return False
         
         # 获取第一个NAS路径对应的容器内部路径
@@ -124,7 +125,8 @@ def trigger_emby_scan(library_id=None):
         container_path = NAS_TO_CONTAINER_PATH_MAP.get(nas_path)
         
         if not container_path:
-            logger.error(f"🔴 找不到 {nas_path} 对应的容器内部路径。请检查 NAS_TO_CONTAINER_PATH_MAP 映射表。")
+            logger.error(f"🔴 找不到 {nas_path} 对应的容器内部路径")
+            logger.error("🔴 请检查配置部分映射表内容")
             return False
         
         json_data = {
@@ -135,18 +137,20 @@ def trigger_emby_scan(library_id=None):
         }
         
         try:
-            logger.info(f"🟣 正在发送 Emby API 请求: {endpoint_desc}...")
+            logger.info("🟣 正在发送 Emby API 请求")
+            logger.info(f"🟣 请求内容: {endpoint_desc}")
             response = requests.post(url, headers=headers, json=json_data, timeout=30)
             
             if response.status_code == 204:
-                logger.info(f"🟢 成功发送请求，Emby 已开始{endpoint_desc}")
+                logger.info("🟢 成功发送请求")
+                logger.info(f"🟢 Emby 已开始{endpoint_desc}")
                 return True
             else:
-                logger.error(f"🔴 发送 Emby API 请求失败 ({endpoint_desc})。状态码: {response.status_code}, 响应: {response.text}")
+                logger.error(f"🔴 发送请求失败，状态码: {response.status_code}, 响应: {response.text}")
                 return False
                 
         except requests.exceptions.RequestException as e:
-            logger.error(f"🔴 连接 Emby 服务器时发生网络错误 ({endpoint_desc})。错误: {e}")
+            logger.error(f"🔴 连接服务器时发生网络错误: {e}")
             return False
             
     else:
@@ -154,18 +158,20 @@ def trigger_emby_scan(library_id=None):
         endpoint_desc = "全部媒体库扫描"
         
         try:
-            logger.info(f"🟣 正在发送 Emby API 请求: {endpoint_desc}...")
+            logger.info("🟣 正在发送 Emby API 请求")
+            logger.info(f"🟣 请求内容: {endpoint_desc}")
             response = requests.post(url, headers=headers, timeout=30)
             
             if response.status_code == 204:
-                logger.info(f"🟢 成功发送请求: {endpoint_desc}。Emby 已开始扫描。")
+                logger.info("🟢 成功发送请求")
+                logger.info(f"🟢 Emby 已开始扫描全部媒体库")
                 return True
             else:
-                logger.error(f"🔴 发送请求失败 ({endpoint_desc})。状态码: {response.status_code}, 响应: {response.text}")
+                logger.error(f"🔴 发送请求失败，状态码: {response.status_code}, 响应: {response.text}")
                 return False
                 
         except requests.exceptions.RequestException as e:
-            logger.error(f"🔴 连接服务器时发生网络错误 ({endpoint_desc})。错误: {e}")
+            logger.error(f"🔴 连接服务器时发生网络错误: {e}")
             return False
 
 class VideoChangeHandler(FileSystemEventHandler):
@@ -177,6 +183,8 @@ class VideoChangeHandler(FileSystemEventHandler):
     def _queue_scan_request(self, path):
         """根据文件路径，将对应的扫描请求加入队列"""
         if not self._is_video_file(path):
+            logger.info("⚪️ 检测到非视频文件变动，忽略处理")
+            logger.info(f"⚪️ 路径: {path}")
             return
 
         matched_library_id = None
@@ -190,26 +198,35 @@ class VideoChangeHandler(FileSystemEventHandler):
         
         with log_lock:
             if matched_library_id:
-                logger.info(f"🟠 检测到变动: {path}。扫描队列已加入媒体库编号: {matched_library_id}。")
+                logger.info("🟠 检测到有文件变动")
+                logger.info(f"🟠 路径: {path}")
+                logger.info(f"🟠 媒体库编号{matched_library_id}已加入到队列")
                 scan_requests.add(matched_library_id)
             else:
-                logger.info(f"🟠 检测到变动: {path}。未匹配到媒体库编号，将触发全库扫描。")
+                logger.info("🟠 检测到有文件变动")
+                logger.info(f"🟠 路径: {path}")
+                logger.info("🟠 未匹配到媒体库编号，将全库扫描")
                 scan_requests.add(FULL_SCAN_MARKER)
 
     def on_created(self, event):
         if not event.is_directory:
-            logger.info(f"🟠 文件创建: {event.src_path}")
+            logger.info("🟠 检测到有文件创建")
+            logger.info(f"🟠 路径: {event.src_path}")
             self._queue_scan_request(event.src_path)
 
     def on_deleted(self, event):
         if not event.is_directory:
-            logger.info(f"🟠 文件删除（自定义不进行刷新扫描）: {event.src_path}")
+            logger.info("⚪️ 检测到有文件删除")
+            logger.info(f"⚪️ 路径: {event.src_path}")
+            logger.info("⚪️ 当前设置为不刷新或非视频文件")
            # self._queue_scan_request(event.src_path)
            # 如果需要变更扫描，取消上一行的注释
 
     def on_moved(self, event):
         if not event.is_directory:
-            logger.info(f"🟠 文件移动/重命名: 从 {event.src_path} 到 {event.dest_path}")
+            logger.info("🟠 检测到有文件移动/重命名")
+            logger.info(f"🟠 从 {event.src_path}")
+            logger.info(f"🟠 到 {event.dest_path}")
             # 移动/重命名事件，源和目标路径都可能触发扫描
             self._queue_scan_request(event.src_path)
             self._queue_scan_request(event.dest_path)
@@ -223,8 +240,9 @@ if not single_instance_lock(LOCK_FILE):
 def main():
     """主函数"""
     logger.info("🔸🔸🔸🔸🔸文件监测系统🔸🔸🔸🔸🔸")
-    logger.info("🟢 Emby媒体库监测扫描系统已启动。")
-    logger.info(f"⚠️ 当前设置 {SCAN_INTERVAL_SECONDS} 秒检查一次文件变动。")
+    logger.info("⚠️ 正在启动Emby媒体库监测扫描系统")
+    logger.info(f"⚠️ 当前设置 {SCAN_INTERVAL_SECONDS} 秒为一循环周期。")
+    logger.info("⚠️ 非视频文件变动将被忽略并记录")
     logger.info("⚠️ 正在监控以下文件夹:")
     for path in MONITORED_FOLDERS_TO_LIBRARY_ID_MAP.keys():
         logger.info(f"📂 - {path}")
@@ -234,35 +252,40 @@ def main():
 
     for path in MONITORED_FOLDERS_TO_LIBRARY_ID_MAP.keys():
         if not os.path.isdir(path):
-            logger.error(f"⚠️ 配置的路径不存在或不是一个目录: {path}。已跳过。")
+            loggeree.error("⚠️ 配置的路径不存在或不是目录")
+            loggeree.error(f"⚠️ 路径: {path}")
             continue
         observer.schedule(event_handler, path, recursive=True)
 
-    observer.start()
     logger.info("🔸🔸🔸🔸🔸详细日志输出🔸🔸🔸🔸🔸")
+    observer.start()
+    logger.info("🟢 服务已启动，正在监听指定文件夹")
     try:
         while True:
             time.sleep(SCAN_INTERVAL_SECONDS)
             
             with log_lock:
                 if not scan_requests:
-                    logger.info("⚪️ 此周期内未监测到视频文件变动，所以将不会请求 Emby 扫描媒体库。")
+                    logger.info("⚪️ 此周期内未监测到视频文件变动。")
                     continue
 
-                logger.info(f"🟠 检测到文件变动，待处理的扫描媒体库编号请求 {list(scan_requests)}")
+                logger.info("🟠 检测到有文件变动")
+                logger.info(f"🟠 待处理媒体库编号 {list(scan_requests)}")
 
                 # 优先级判断：如果全库扫描在请求中，则只执行全库扫描
                 if FULL_SCAN_MARKER in scan_requests:
-                    logger.info("🟣 检测到全部媒体库扫描请求，将优先执行全部媒体库扫描并忽略其他特定媒体库扫描。")
+                    logger.info("🟣 检测到全部媒体库扫描请求")
+                    logger.info("🟣 将优先执行并忽略其他扫描。")
                     trigger_emby_scan()
                 else:
-                    logger.info("🟣 正在对发生变动的特定媒体库发送扫描请求...")
+                    logger.info("🟣 正在对特定媒体库发送扫描请求...")
                     for library_id in list(scan_requests):
                         trigger_emby_scan(library_id)
                 
                 # 清空本次周期的请求
                 scan_requests.clear()
-                logger.info("🟢 扫描队列已操作完成并清空，等待下一个扫描周期。")
+                logger.info("🟢 扫描队列已操作完成并清空")
+                logger.info("🟢 继续进行下一个扫描周期...")
 
     except KeyboardInterrupt:
         logger.warning("🔴 接收到停止信号，正在关闭脚本...")
