@@ -222,10 +222,10 @@ if not single_instance_lock(LOCK_FILE):
 
 def main():
     """主函数"""
-    logger.info("🔸"*15)
-    logger.info("❤️ Emby 媒体库监测脚本已启动。")
-    logger.info(f"❤️ 将每隔 {SCAN_INTERVAL_SECONDS} 秒检查一次文件变动。")
-    logger.info("❤️ 正在监控以下文件夹:")
+    logger.info("🔸🔸🔸🔸🔸文件监测系统🔸🔸🔸🔸🔸")
+    logger.info("🟢 Emby媒体库监测扫描系统已启动。")
+    logger.info(f"⚠️ 当前设置 {SCAN_INTERVAL_SECONDS} 秒检查一次文件变动。")
+    logger.info("⚠️ 正在监控以下文件夹:")
     for path in MONITORED_FOLDERS_TO_LIBRARY_ID_MAP.keys():
         logger.info(f"📂 - {path}")
 
@@ -239,8 +239,7 @@ def main():
         observer.schedule(event_handler, path, recursive=True)
 
     observer.start()
-    logger.info("🟢 文件系统监测已启动...")
-    logger.info("🔸"*15)
+    logger.info("🔸🔸🔸🔸🔸详细日志输出🔸🔸🔸🔸🔸")
     try:
         while True:
             time.sleep(SCAN_INTERVAL_SECONDS)
