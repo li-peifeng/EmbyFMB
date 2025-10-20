@@ -9,7 +9,7 @@
 # 适合用于 Docker 容器内运行的 Emby 服务器。
 # 并且支持 NAS 路径到 Emby 容器内部路径的映射。 并且支持多媒体库监控。
 # 适用于 Emby 服务器版本 4.x 及以上，远程SMB，WebDAV等不在一个主机上的不能直接使用Emby文件夹监控的情况。
-# Version = "v1.1.6 - 2025-10-21"
+# Version = "v1.1.7 - 2025-10-21"
 
 import os
 import time
@@ -274,7 +274,7 @@ def notification_worker():
                     grouped_changes[change['event_type']][library_name].append(filename)
                 
                 # 构建通知消息
-                message = "⭐️ <b>文件变动实时通知</b> ⭐️\n\n"
+                message = "⭐️ 文件变动实时通知 ⭐️\n\n"
                 message += f"📢 检测到 {len(notification_queue)} 个视频文件变动\n"
                 message += "—————————\n"
                 
@@ -288,10 +288,10 @@ def notification_worker():
                 
                 for event_type, libraries in grouped_changes.items():
                     icon = event_icons.get(event_type, "⚪️")
-                    message += f"{icon} <b>{event_type}</b>\n"
+                    message += f"{icon} {event_type}\n"
                     
                     for library_name, filenames in libraries.items():
-                        message += f"🎬 <b>{library_name}</b> ({len(filenames)})\n"
+                        message += f"🎬 {library_name} ({len(filenames)})\n"
                         
                         # 只显示前5个文件名，其余的用省略号表示
                         for filename in filenames[:5]:
@@ -474,7 +474,7 @@ def main():
                                 trigger_emby_scan(library_id)
                         
                         # 扫描完成后发送汇总通知
-                        message = "🎬 <b>Emby 服务器操作记录</b>\n\n"
+                        message = "🎬 Emby 服务器操作记录\n\n"
                         if FULL_SCAN_MARKER in scan_requests:
                             message += "🟢 已触发【全部媒体库】扫描\n"
                         elif scan_requests:
@@ -483,11 +483,6 @@ def main():
                                 message += f"🟢 【{library_name}媒体库】已完成刷新\n"
                         else:
                             message += "⚪️ 未触发刷新扫描（仅记录变动）\n"
-                        
-                        # 添加时间戳和页脚
-                        current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-                        message += f"\n⏰ 时间: {current_time}\n"
-                        message += f"{TELEGRAM_NOTIFICATION_FOOTER}"
                         
                         send_telegram_notification(message)
                     
