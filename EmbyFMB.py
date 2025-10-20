@@ -9,7 +9,7 @@
 # 适合用于 Docker 容器内运行的 Emby 服务器。
 # 并且支持 NAS 路径到 Emby 容器内部路径的映射。 并且支持多媒体库监控。
 # 适用于 Emby 服务器版本 4.x 及以上，远程SMB，WebDAV等不在一个主机上的不能直接使用Emby文件夹监控的情况。
-# Version = "v1.1.0 - 2025-10-20"  # 更新版本号
+# Version = "v2.0.0 - 2025-10-20"  # 更新版本号
 
 import os
 import time
@@ -24,13 +24,21 @@ import fcntl
 import traceback
 
 # --- 您需要在此处进行配置 ---
+
 # Emby 服务器信息
 EMBY_SERVER_URL = "http://10.0.0.3:8096"  # 替换为您的 Emby 服务器地址
-EMBY_API_KEY = "88888888888888888888"           # 替换为您的 Emby API 密钥
+EMBY_API_KEY = "XXXXXXXXXXXXXXXXXXXXXX"           # 替换为您的 Emby API 密钥
 
 # Telegram Bot 配置
-TELEGRAM_BOT_TOKEN = "88888888888888888"  # 替换为您的 Telegram Bot Token
-TELEGRAM_CHAT_ID = "88888888"      # 替换为您的 Telegram Chat ID
+TELEGRAM_BOT_TOKEN = "XXXXXXXXXXXXXXXXXXXXXX"  # 替换为您的 Telegram Bot Token
+TELEGRAM_CHAT_ID = "8888888888"      # 替换为您的 Telegram Chat ID
+
+# 扫描触发周期（秒）
+SCAN_INTERVAL_SECONDS = 600  # 每隔10分钟检查一次文件变动
+# 日志文件配置
+LOG_FILE_PATH = "/volume5/docker/EmbyFMB/EmbyFMB.log"  # 日志文件存放路径，请确保该目录存在
+LOG_MAX_BYTES = 1 * 1024 * 1024  # 1 MB
+LOG_BACKUP_COUNT = 2  # 最多保留3个日志文件 (monitor.log, monitor.log.1, monitor.log.2)
 
 # NAS路径到Emby容器内部路径的映射
 # 格式: {"NAS上的绝对路径": "Emby容器内部看到的路径"}
@@ -43,28 +51,26 @@ NAS_TO_CONTAINER_PATH_MAP = {
 # 媒体库路径到 ID 的映射
 # 格式: {"NAS 上的绝对路径": "Emby 媒体库 ID"}
 MONITORED_FOLDERS_TO_LIBRARY_ID_MAP = {
-    "/volume1/Video/电影": "88888",  # 电影
-    "/volume1/Video/电视剧": "8888888",  # 电视剧
+    "/volume6/Media/Jav": "777777777",  # 成人-1
+    "/volume2/Sexy/Jav-Sexy": "777777777",  # 成人-2
+    "/volume1/Video/电影": "8888888888",  # 电影
+    "/volume1/Video/电视剧": "9999999999",  # 电视剧
     # 在这里添加更多您需要监控的文件夹和对应的媒体库 ID...
 }
 
 # 媒体库ID到名称的映射
 LIBRARY_ID_TO_NAME = {
-    "888": "成人",
-    "88888": "电影",
-    "8888888": "电视剧",
+    "7777777777": "成人",
+    "8888888888": "电影",
+    "9999999999": "剧集",
     # 添加更多映射...
 }
 
 # 要监控的视频文件扩展名（小写）
 VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.mpg', '.mpeg', '.flv', '.webm', '.ts', '.rmvb', '.iso', '.vob')
 
-# 扫描触发周期（秒）
-SCAN_INTERVAL_SECONDS = 600  # 每隔10分钟检查一次文件变动
-# 日志文件配置
-LOG_FILE_PATH = "/volume5/docker/EmbyFMB/EmbyFMB.log"  # 日志文件存放路径，请确保该目录存在
-LOG_MAX_BYTES = 1 * 1024 * 1024  # 1 MB
-LOG_BACKUP_COUNT = 2  # 最多保留3个日志文件 (monitor.log, monitor.log.1, monitor.log.2)
+# Telegram通知页脚
+TELEGRAM_NOTIFICATION_FOOTER = "👤 Emby File Monitor with TG BOT by Leo"
 
 # --- 配置结束 ---
 
@@ -124,13 +130,17 @@ except Exception as e:
 def send_telegram_notification(message):
     """通过Telegram Bot发送通知"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        logger.warning("⚠️ TG BOT未配置，跳过通知发送")
+        logger.warning("⚠️ Telegram 未配置，通知发送被跳过")
         return False
     
+    # 添加时间戳到页脚
+    current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    message_with_timestamp_and_footer = f"{message}\n⏰ 时间: {current_time}\n\n{TELEGRAM_NOTIFICATION_FOOTER}"
+
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
+        "text": message_with_timestamp_and_footer,
         "parse_mode": "HTML",
         "disable_web_page_preview": True
     }
@@ -138,14 +148,14 @@ def send_telegram_notification(message):
     try:
         response = requests.post(url, json=payload, timeout=10)
         if response.status_code == 200:
-            logger.info("🟢 Telegram通知发送成功")
+            logger.info("🟢 Telegram 通知发送成功")
             return True
         else:
-            logger.error(f"🔴 Telegram通知发送失败，状态码: {response.status_code}")
+            logger.error(f"🔴 Telegram 知发送失败，状态码: {response.status_code}")
             logger.error(f"🔴 响应内容: {response.text}")
             return False
     except Exception as e:
-        logger.error(f"🔴 发送Telegram通知时出错: {str(e)}")
+        logger.error(f"🔴 发送 Telegram 通知时出错: {str(e)}")
         return False
 
 def trigger_emby_scan(library_id=None):
@@ -163,13 +173,13 @@ def trigger_emby_scan(library_id=None):
         
         # 获取媒体库名称
         library_name = LIBRARY_ID_TO_NAME.get(library_id, f"未知({library_id})")
-        endpoint_desc = f"{library_name}媒体库扫描"
+        endpoint_desc = f"【{library_name}媒体库】扫描"
         
         # 使用映射表获取对应的NAS路径
         nas_paths = [path for path, lid in MONITORED_FOLDERS_TO_LIBRARY_ID_MAP.items() if lid == library_id]
         
         if not nas_paths:
-            logger.error(f"🔴 找不到媒体库{library_name}对应的路径")
+            logger.error(f"🔴 找不到【{library_name}媒体库】对应的路径")
             logger.error("🔴 请检查配置部分映射表内容")
             return False
         
@@ -178,7 +188,7 @@ def trigger_emby_scan(library_id=None):
         container_path = NAS_TO_CONTAINER_PATH_MAP.get(nas_path)
         
         if not container_path:
-            logger.error(f"🔴 找不到 {nas_path} 对应的容器内部路径")
+            logger.error(f"🔴 找不到【{nas_path}】对应的容器内部路径")
             logger.error("🔴 请检查配置部分映射表内容")
             return False
         
@@ -208,7 +218,7 @@ def trigger_emby_scan(library_id=None):
             
     else:
         url = f"{EMBY_SERVER_URL}/emby/Library/Refresh"
-        endpoint_desc = "全部媒体库扫描"
+        endpoint_desc = "【全部媒体库】扫描"
         
         try:
             logger.info("🟣 正在发送 Emby API 请求")
@@ -217,7 +227,7 @@ def trigger_emby_scan(library_id=None):
             
             if response.status_code == 204:
                 logger.info("🟢 成功发送请求")
-                logger.info(f"🟢 Emby 已开始扫描全部媒体库")
+                logger.info(f"🟢 Emby 已开始{endpoint_desc}")
                 return True
             else:
                 logger.error(f"🔴 发送请求失败，状态码: {response.status_code}, 响应: {response.text}")
@@ -237,7 +247,7 @@ class VideoChangeHandler(FileSystemEventHandler):
         """根据文件路径，将对应的扫描请求加入队列，并记录变动信息"""
         if not self._is_video_file(path):
             logger.info("⚪️ 检测到非视频文件变动，忽略处理")
-            logger.info(f"⚪️ 路径: {path}")
+            logger.info(f"⚪️ 路径:【{path}】")
             return
 
         matched_library_id = None
@@ -261,12 +271,12 @@ class VideoChangeHandler(FileSystemEventHandler):
                 # 获取媒体库名称
                 library_name = LIBRARY_ID_TO_NAME.get(matched_library_id, f"未知({matched_library_id})")
                 logger.info("🟠 检测到有文件变动")
-                logger.info(f"🟠 路径: {path}")
-                logger.info(f"🟠 {library_name}媒体库已加入到待扫描队列")
+                logger.info(f"🟠 路径:【{path}】")
+                logger.info(f"🟠 Emby【{library_name}媒体库】已加入到队列")
                 scan_requests.add(matched_library_id)
             else:
                 logger.info("🟠 检测到有文件变动")
-                logger.info(f"🟠 路径: {path}")
+                logger.info(f"🟠 路径:【{path}】")
                 logger.info("🟠 未匹配到媒体库编号，将全库扫描")
                 scan_requests.add(FULL_SCAN_MARKER)
 
@@ -312,12 +322,13 @@ def main():
         logger.info(f"⚠️ 当前设置 {SCAN_INTERVAL_SECONDS} 秒为一循环周期。")
         logger.info("⚠️ 非视频文件变动将被忽略并记录")
         logger.info("⚠️ 视频文件变动会发送TG BOT通知")
-        logger.info("⚠️ 正在监控以下文件夹:")
+        logger.info("⚠️ 正在监控以下文件夹和媒体库:")
         for path in MONITORED_FOLDERS_TO_LIBRARY_ID_MAP.keys():
             # 获取媒体库名称
             library_id = MONITORED_FOLDERS_TO_LIBRARY_ID_MAP[path]
             library_name = LIBRARY_ID_TO_NAME.get(library_id, f"未知({library_id})")
-            logger.info(f"📂 - {path} ({library_name})")
+            logger.info(f"📂 - {path}")
+            logger.info(f"└ 🎞️ - {library_name}媒体库")
 
         event_handler = VideoChangeHandler()
         observer = Observer()
@@ -346,7 +357,7 @@ def main():
                     if file_changes:
                         # 生成精美的Telegram通知消息
                         # 添加页头      
-                        message = "⭐️EmbyFMB监测报告⭐️\n\n"
+                        message = "⭐️ EmbyFMB 监测报告 ⭐️\n\n"
                         message += f"🕒 监测周期: {SCAN_INTERVAL_SECONDS}秒\n"
                         message += f"🔖 变动数量: {len(file_changes)}\n"
                         message += "—————————\n"
@@ -383,27 +394,24 @@ def main():
                                     # 缩短过长的文件名（超过50字符）
                                     display_name = item['filename'] if len(item['filename']) <= 50 else item['filename'][:47] + "..."
                                     message += f"🍬 <code>{display_name}</code>\n"
-                                    message += f"└ 🎞️ 媒体库: {item['library']}\n"
+                                    message += f"└ 🎞️ 所属媒体库: {item['library']}\n"
                                 message += "—————————\n"
                         
                         # 添加扫描操作信息
-                        message += "🎬 Emby服务器操作记录:\n"
+                        message += "🎬 Emby 服务器操作记录:\n"
                         if FULL_SCAN_MARKER in scan_requests:
-                            message += "🟢 已触发全库扫描\n"
+                            message += "🟢 已触发【全部媒体库】扫描\n"
                         elif scan_requests:
                             for library_id in scan_requests:
                                 library_name = LIBRARY_ID_TO_NAME.get(library_id, f"未知({library_id})")
-                                message += f"🟢 已扫描刷新媒体库: {library_name}\n"
+                                message += f"🟢 【{library_name}媒体库】已完成刷新\n"
                         else:
                             message += "⚪️ 未触发刷新扫描（仅记录变动）\n"
-                        
-                        # 添加页脚
-                        message += "\n©️Emby File Monitor with TG BOT"
                         
                         # 发送Telegram通知
                         send_telegram_notification(message)
                     else:
-                        logger.info("⚪️ 没有文件变动，不发送TG通知。")
+                        logger.info("⚪️ 没有文件变动，略过所有通知。")
                     
                     # 处理扫描请求
                     if scan_requests:
@@ -417,15 +425,15 @@ def main():
                                 lib_names.append(lib_name)
                         
                         logger.info("🟠 检测到有文件变动")
-                        logger.info(f"🟠 待扫描处理媒体库: {', '.join(lib_names)}")
+                        logger.info(f"🟠 待扫描处理媒体库:【{', '.join(lib_names)}】")
 
                         # 优先级判断：如果全库扫描在请求中，则只执行全库扫描
                         if FULL_SCAN_MARKER in scan_requests:
-                            logger.info("🟣 检测到全部媒体库扫描请求")
+                            logger.info("🟣 检测到【全部媒体库】扫描请求")
                             logger.info("🟣 将优先执行并忽略其他扫描。")
                             trigger_emby_scan()
                         else:
-                            logger.info("🟣 正在对特定媒体库发送扫描请求...")
+                            logger.info("🟣 正在对【特定媒体库】发送扫描请求")
                             for library_id in list(scan_requests):
                                 trigger_emby_scan(library_id)
                     
