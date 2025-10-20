@@ -18,12 +18,16 @@
 - 所有需要您修改的参数都集中在脚本的开头部分，一目了然。
 5. 后台运行：
 - 提供了在群晖中通过“任务计划程序”或 SSH 在后台稳定运行的说明。
+6. Telegram bot 通知
+-  支持通过Telegram 机器人通知变动情况。
 
 截图：
 
 <img width="688" height="384" alt="截屏2025-10-19 17 01 45" src="https://github.com/user-attachments/assets/2a358502-8cac-42e4-a802-f505c34c73d1" />
 
 <img width="792" height="421" alt="截屏2025-10-19 17 02 31" src="https://github.com/user-attachments/assets/24559889-c626-4a4c-900f-748b95efd4bd" />
+
+![IMG_2287](https://github.com/user-attachments/assets/c8affb2b-bccd-4206-b58d-f56b32ca618e)
 
 
 ## 第1步：准备环境
