@@ -9,7 +9,7 @@
 # 适合用于 Docker 容器内运行的 Emby 服务器。
 # 并且支持 NAS 路径到 Emby 容器内部路径的映射。 并且支持多媒体库监控。
 # 适用于 Emby 服务器版本 4.x 及以上，远程SMB，WebDAV等不在一个主机上的不能直接使用Emby文件夹监控的情况。
-# Version = "v2.0.0 - 2025-10-20"  # 更新版本号
+# Version = "v1.1.6 - 2025-10-21"
 
 import os
 import time
@@ -22,16 +22,17 @@ from watchdog.events import FileSystemEventHandler
 import sys
 import fcntl
 import traceback
+from collections import defaultdict
 
 # --- 您需要在此处进行配置 ---
 
 # Emby 服务器信息
 EMBY_SERVER_URL = "http://10.0.0.3:8096"  # 替换为您的 Emby 服务器地址
-EMBY_API_KEY = "XXXXXXXXXXXXXXXXXXXXXX"           # 替换为您的 Emby API 密钥
+EMBY_API_KEY = "888888888888888888888"           # 替换为您的 Emby API 密钥
 
 # Telegram Bot 配置
-TELEGRAM_BOT_TOKEN = "XXXXXXXXXXXXXXXXXXXXXX"  # 替换为您的 Telegram Bot Token
-TELEGRAM_CHAT_ID = "8888888888"      # 替换为您的 Telegram Chat ID
+TELEGRAM_BOT_TOKEN = "99999999999999:88888888888888888"  # 替换为您的 Telegram Bot Token
+TELEGRAM_CHAT_ID = "88888888888888"      # 替换为您的 Telegram Chat ID
 
 # 扫描触发周期（秒）
 SCAN_INTERVAL_SECONDS = 600  # 每隔10分钟检查一次文件变动
@@ -51,18 +52,15 @@ NAS_TO_CONTAINER_PATH_MAP = {
 # 媒体库路径到 ID 的映射
 # 格式: {"NAS 上的绝对路径": "Emby 媒体库 ID"}
 MONITORED_FOLDERS_TO_LIBRARY_ID_MAP = {
-    "/volume6/Media/Jav": "777777777",  # 成人-1
-    "/volume2/Sexy/Jav-Sexy": "777777777",  # 成人-2
-    "/volume1/Video/电影": "8888888888",  # 电影
-    "/volume1/Video/电视剧": "9999999999",  # 电视剧
+    "/volume1/Video/电影": "888",  # 电影
+    "/volume1/Video/电视剧": "999",  # 电视剧
     # 在这里添加更多您需要监控的文件夹和对应的媒体库 ID...
 }
 
 # 媒体库ID到名称的映射
 LIBRARY_ID_TO_NAME = {
-    "7777777777": "成人",
-    "8888888888": "电影",
-    "9999999999": "剧集",
+    "888": "电影",
+    "999": "剧集",
     # 添加更多映射...
 }
 
@@ -71,6 +69,9 @@ VIDEO_EXTENSIONS = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.mpg', '.mpeg', '.f
 
 # Telegram通知页脚
 TELEGRAM_NOTIFICATION_FOOTER = "👤 Emby File Monitor with TG BOT by Leo"
+
+# 通知聚合时间窗口（秒）
+NOTIFICATION_WINDOW_SECONDS = 5
 
 # --- 配置结束 ---
 
@@ -88,6 +89,9 @@ scan_requests = set()
 file_changes = []  # 存储文件变动信息
 FULL_SCAN_MARKER = "full_scan"
 log_lock = threading.Lock()
+notification_queue = []  # 存储待通知的文件变动信息
+last_notification_time = 0  # 上次通知时间（时间戳）
+notification_thread_running = True  # 通知线程运行标志
 
 def setup_logging():
     """配置日志记录器"""
@@ -146,12 +150,13 @@ def send_telegram_notification(message):
     }
     
     try:
+        logger.info("🟣 正在发送 Telegram 通知...")
         response = requests.post(url, json=payload, timeout=10)
         if response.status_code == 200:
             logger.info("🟢 Telegram 通知发送成功")
             return True
         else:
-            logger.error(f"🔴 Telegram 知发送失败，状态码: {response.status_code}")
+            logger.error(f"🔴 Telegram 通知发送失败，状态码: {response.status_code}")
             logger.error(f"🔴 响应内容: {response.text}")
             return False
     except Exception as e:
@@ -237,6 +242,79 @@ def trigger_emby_scan(library_id=None):
             logger.error(f"🔴 连接服务器时发生网络错误: {e}")
             return False
 
+def notification_worker():
+    """通知工作线程，定期检查并发送通知"""
+    global last_notification_time, notification_queue
+    while notification_thread_running:
+        try:
+            time.sleep(NOTIFICATION_WINDOW_SECONDS)
+            
+            with log_lock:
+                if not notification_queue:
+                    continue
+                
+                # 计算距离上次通知的时间
+                current_time = time.time()
+                time_since_last_notification = current_time - last_notification_time
+                
+                # 如果距离上次通知不足5秒，继续等待
+                if time_since_last_notification < NOTIFICATION_WINDOW_SECONDS:
+                    continue
+                
+                # 按事件类型和媒体库分组
+                grouped_changes = defaultdict(lambda: defaultdict(list))
+                
+                for change in notification_queue:
+                    # 获取文件名（不含路径）
+                    filename = os.path.basename(change['path'])
+                    # 获取媒体库名称
+                    library_name = LIBRARY_ID_TO_NAME.get(change['library_id'], f"未知({change['library_id']})")
+                    
+                    # 添加到对应事件类型的列表
+                    grouped_changes[change['event_type']][library_name].append(filename)
+                
+                # 构建通知消息
+                message = "⭐️ <b>文件变动实时通知</b> ⭐️\n\n"
+                message += f"📢 检测到 {len(notification_queue)} 个视频文件变动\n"
+                message += "—————————\n"
+                
+                # 事件类型图标
+                event_icons = {
+                    "创建": "🟢",
+                    "删除": "🔴",
+                    "移动(源)": "🟡",
+                    "移动(目标)": "🔵"
+                }
+                
+                for event_type, libraries in grouped_changes.items():
+                    icon = event_icons.get(event_type, "⚪️")
+                    message += f"{icon} <b>{event_type}</b>\n"
+                    
+                    for library_name, filenames in libraries.items():
+                        message += f"🎬 <b>{library_name}</b> ({len(filenames)})\n"
+                        
+                        # 只显示前5个文件名，其余的用省略号表示
+                        for filename in filenames[:5]:
+                            # 缩短过长的文件名（超过50字符）
+                            display_name = filename if len(filename) <= 50 else filename[:47] + "..."
+                            message += f"🍬 <code>{display_name}</code>\n"
+                        
+                        if len(filenames) > 5:
+                            message += f"└ ...等 {len(filenames) - 5} 个文件\n"
+                    
+                    message += "—————————\n"
+                
+                # 发送通知
+                if send_telegram_notification(message):
+                    # 清空通知队列
+                    notification_queue = []
+                    last_notification_time = current_time
+                    logger.info("🟢 批量通知发送完成，队列已清空")
+                
+        except Exception as e:
+            logger.error(f"🔴 通知工作线程发生错误: {str(e)}")
+            logger.error(traceback.format_exc())
+
 class VideoChangeHandler(FileSystemEventHandler):
     """文件系统事件处理器"""
     def _is_video_file(self, path):
@@ -279,6 +357,15 @@ class VideoChangeHandler(FileSystemEventHandler):
                 logger.info(f"🟠 路径:【{path}】")
                 logger.info("🟠 未匹配到媒体库编号，将全库扫描")
                 scan_requests.add(FULL_SCAN_MARKER)
+            
+            # 添加到通知队列
+            notification_queue.append({
+                "path": path,
+                "event_type": event_type,
+                "library_id": matched_library_id or "未知"
+            })
+            
+            logger.info(f"🟠 已添加到通知队列，当前队列大小: {len(notification_queue)}")
 
     def on_created(self, event):
         if not event.is_directory:
@@ -316,12 +403,15 @@ if not single_instance_lock(LOCK_FILE):
 
 def main():
     """主函数"""
+    global notification_thread_running
+    
     try:
         logger.info("🔸🔸🔸🔸🔸EmbyFMB🔸🔸🔸🔸🔸")
         logger.info("⚠️ 正在启动EmbyFMB监测系统")
         logger.info(f"⚠️ 当前设置 {SCAN_INTERVAL_SECONDS} 秒为一循环周期。")
         logger.info("⚠️ 非视频文件变动将被忽略并记录")
-        logger.info("⚠️ 视频文件变动会发送TG BOT通知")
+        logger.info("⚠️ 视频文件变动会发送 TG BOT 通知")
+        logger.info(f"⚠️ TG BOT 通知延迟时间: {NOTIFICATION_WINDOW_SECONDS} 秒")
         logger.info("⚠️ 正在监控以下文件夹和媒体库:")
         for path in MONITORED_FOLDERS_TO_LIBRARY_ID_MAP.keys():
             # 获取媒体库名称
@@ -344,6 +434,12 @@ def main():
         observer.start()
         logger.info("🟢 服务已启动，正在监听指定文件夹")
         
+        # 启动通知工作线程
+        notification_thread = threading.Thread(target=notification_worker)
+        notification_thread.daemon = True
+        notification_thread.start()
+        logger.info("🟢 通知工作线程已启动")
+
         try:
             while True:
                 time.sleep(SCAN_INTERVAL_SECONDS)
@@ -353,66 +449,6 @@ def main():
                         logger.info("⚪️ 此周期内未监测到视频文件变动。")
                         continue
 
-                    # 只有当有文件变动时才发送Telegram通知
-                    if file_changes:
-                        # 生成精美的Telegram通知消息
-                        # 添加页头      
-                        message = "⭐️ EmbyFMB 监测报告 ⭐️\n\n"
-                        message += f"🕒 监测周期: {SCAN_INTERVAL_SECONDS}秒\n"
-                        message += f"🔖 变动数量: {len(file_changes)}\n"
-                        message += "—————————\n"
-                        
-                        # 按事件类型分类
-                        event_types = {
-                            "创建": {"icon": "🟢", "items": []},
-                            "删除": {"icon": "🔴", "items": []},
-                            "移动(源)": {"icon": "🟡", "items": []},
-                            "移动(目标)": {"icon": "🔵", "items": []}
-                        }
-                        
-                        for change in file_changes:
-                            # 获取文件名（不含路径）
-                            filename = os.path.basename(change['path'])
-                            # 获取媒体库名称
-                            library_name = LIBRARY_ID_TO_NAME.get(change['library_id'], f"未知({change['library_id']})")
-                            
-                            # 添加到对应事件类型的列表
-                            if change['event_type'] in event_types:
-                                event_types[change['event_type']]["items"].append({
-                                    "filename": filename,
-                                    "library": library_name
-                                })
-                        
-                        # 添加变动详情
-                        for event_type, data in event_types.items():
-                            if data["items"]:
-                                # 修复f-string括号问题
-                                items_count = len(data["items"])
-                                message += f"{data['icon']} {event_type} ({items_count})\n"
-                                
-                                for item in data["items"]:
-                                    # 缩短过长的文件名（超过50字符）
-                                    display_name = item['filename'] if len(item['filename']) <= 50 else item['filename'][:47] + "..."
-                                    message += f"🍬 <code>{display_name}</code>\n"
-                                    message += f"└ 🎞️ 所属媒体库: {item['library']}\n"
-                                message += "—————————\n"
-                        
-                        # 添加扫描操作信息
-                        message += "🎬 Emby 服务器操作记录:\n"
-                        if FULL_SCAN_MARKER in scan_requests:
-                            message += "🟢 已触发【全部媒体库】扫描\n"
-                        elif scan_requests:
-                            for library_id in scan_requests:
-                                library_name = LIBRARY_ID_TO_NAME.get(library_id, f"未知({library_id})")
-                                message += f"🟢 【{library_name}媒体库】已完成刷新\n"
-                        else:
-                            message += "⚪️ 未触发刷新扫描（仅记录变动）\n"
-                        
-                        # 发送Telegram通知
-                        send_telegram_notification(message)
-                    else:
-                        logger.info("⚪️ 没有文件变动，略过所有通知。")
-                    
                     # 处理扫描请求
                     if scan_requests:
                         # 获取媒体库名称列表
@@ -436,6 +472,24 @@ def main():
                             logger.info("🟣 正在对【特定媒体库】发送扫描请求")
                             for library_id in list(scan_requests):
                                 trigger_emby_scan(library_id)
+                        
+                        # 扫描完成后发送汇总通知
+                        message = "🎬 <b>Emby 服务器操作记录</b>\n\n"
+                        if FULL_SCAN_MARKER in scan_requests:
+                            message += "🟢 已触发【全部媒体库】扫描\n"
+                        elif scan_requests:
+                            for library_id in scan_requests:
+                                library_name = LIBRARY_ID_TO_NAME.get(library_id, f"未知({library_id})")
+                                message += f"🟢 【{library_name}媒体库】已完成刷新\n"
+                        else:
+                            message += "⚪️ 未触发刷新扫描（仅记录变动）\n"
+                        
+                        # 添加时间戳和页脚
+                        current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+                        message += f"\n⏰ 时间: {current_time}\n"
+                        message += f"{TELEGRAM_NOTIFICATION_FOOTER}"
+                        
+                        send_telegram_notification(message)
                     
                     # 清空本次周期的请求和变动记录
                     scan_requests.clear()
@@ -451,6 +505,8 @@ def main():
             logger.error(traceback.format_exc())
             logger.error("🔴 脚本将退出")
         finally:
+            # 停止通知线程
+            notification_thread_running = False
             observer.stop()
             observer.join()
             logger.info("🔴 文件监测系统已停止。脚本已关闭。")
